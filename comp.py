@@ -187,9 +187,8 @@ class SymbolTable:
         """Get all symbols"""
         return list(self.symbols.values())
 
-
-        # ============================================================================
-# PARSER AND SEMANTIC ANALYZER
+# ============================================================================
+# PARSER AND SEMANTIC ANALYZER 
 # ============================================================================
 
 class Parser:
@@ -215,6 +214,12 @@ class Parser:
         code = {'op': op, 'arg1': arg1, 'arg2': arg2, 'result': result}
         self.intermediate_code.append(code)
         return result
+    
+    def backpatch(self, code_list, label):
+        """Backpatch a list of instructions with a label"""
+        for code in code_list:
+            if code['arg2'] == 'BACKPATCH':
+                code['arg2'] = label
     
     # Grammar rules
     def p_program(self, p):
@@ -245,8 +250,9 @@ class Parser:
         var_type = p[1]
         var_name = p[2]
         
-        if self.symbol_table.lookup(var_name):
-            self.errors.append(f"Variable '{var_name}' already declared")
+        # Check if variable already declared in current scope
+        if self.symbol_table.lookup_current_scope(var_name):
+            self.errors.append(f"Variable '{var_name}' already declared in current scope")
         else:
             if len(p) == 4:
                 self.symbol_table.insert(var_name, var_type)
@@ -279,38 +285,54 @@ class Parser:
         p[0] = ('print', p[3])
     
     def p_if_statement(self, p):
-        '''if_statement : IF LPAREN condition RPAREN block
-                       | IF LPAREN condition RPAREN block ELSE block'''
-        cond = p[3]
-        true_label = self.new_label()
-        false_label = self.new_label()
-        end_label = self.new_label()
+        '''if_statement : IF LPAREN condition RPAREN m_label block n_label
+                       | IF LPAREN condition RPAREN m_label block n_label ELSE m_label block'''
+        # p[3] = condition temp variable
+        # p[5] = m_label after condition
+        # p[6] = true block
+        # p[7] = n_label after true block
         
-        self.emit('if_false', cond, false_label, None)
-        self.emit('label', true_label, None, None)
-        
-        if len(p) == 6:
-            self.emit('goto', end_label, None, None)
+        if len(p) == 8:  # Simple if
+           
+            false_label = p[5]
             self.emit('label', false_label, None, None)
-        else:
+        else:  # if-else (len == 11)
+           
+          
+            false_label = p[5]
+            end_label = p[9]
             self.emit('label', false_label, None, None)
-            self.emit('goto', end_label, None, None)
+            self.emit('label', end_label, None, None)
         
-        self.emit('label', end_label, None, None)
-        p[0] = ('if', cond, p[5])
+        p[0] = ('if', p[3])
     
     def p_while_statement(self, p):
-        '''while_statement : WHILE LPAREN condition RPAREN block'''
-        start_label = self.new_label()
-        end_label = self.new_label()
+        '''while_statement : WHILE m_label LPAREN condition RPAREN m_label block n_label'''
         
-        self.emit('label', start_label, None, None)
-        cond = p[3]
-        self.emit('if_false', cond, end_label, None)
+        start_label = p[2]
+        exit_label = p[6]
+        
+        # Jump back to start
         self.emit('goto', start_label, None, None)
-        self.emit('label', end_label, None, None)
+        # Exit label
+        self.emit('label', exit_label, None, None)
         
-        p[0] = ('while', cond, p[5])
+        p[0] = ('while', p[4])
+    
+    def p_m_label(self, p):
+        '''m_label : '''
+        # Create a new label and emit it
+        label = self.new_label()
+        self.emit('label', label, None, None)
+        p[0] = label
+    
+    def p_n_label(self, p):
+        '''n_label : '''
+        # Create a label for later use (for goto)
+        label = self.new_label()
+        # Don't emit yet, will be used for jumps
+        self.emit('goto', label, None, None)
+        p[0] = label
     
     def p_block(self, p):
         '''block : LBRACE statement_list RBRACE'''
@@ -320,7 +342,12 @@ class Parser:
         '''condition : expression relop expression'''
         temp = self.new_temp()
         self.emit(p[2], p[1], p[3], temp)
-        p[0] = temp
+        
+        # Emit conditional jump right after condition
+        false_label = self.new_label()
+        self.emit('if_false', temp, false_label, None)
+        
+        p[0] = (temp, false_label)
     
     def p_relop(self, p):
         '''relop : LT
@@ -385,8 +412,42 @@ class Parser:
         self.errors = []
         self.parse_tree = []
         
-        result = self.parser.parse(data)
+        # Create a custom lexer that tracks scopes
+        lexer = ScopeTrackingLexer(self.symbol_table)
+        lexer.build()
+        
+        result = self.parser.parse(data, lexer=lexer.lexer)
         return result
+
+
+# ============================================================================
+# SCOPE TRACKING LEXER WRAPPER
+# ============================================================================
+
+class ScopeTrackingLexer(Lexer):
+    """Extended lexer that tracks scope changes during tokenization"""
+    
+    def __init__(self, symbol_table):
+        super().__init__()
+        self.symbol_table = symbol_table
+        self.original_token = None
+        
+    def build(self):
+        super().build()
+        # Wrap the token method to track scopes
+        self.original_token = self.lexer.token
+        self.lexer.token = self.token_with_scope_tracking
+    
+    def token_with_scope_tracking(self):
+        tok = self.original_token()
+        if tok:
+            if tok.type == 'LBRACE':
+                self.symbol_table.enter_scope()
+            elif tok.type == 'RBRACE':
+                self.symbol_table.exit_scope()
+        return tok
+
+
 # ============================================================================
 # CODE GENERATOR (Assembly)
 # ============================================================================
