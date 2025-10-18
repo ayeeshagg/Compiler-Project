@@ -1,7 +1,7 @@
 """
 Author: Ayesha Siddika
 CSE 430 - Compiler Design
-Mini Compiler Project
+Mini Compiler Project - Fully Fixed Version
 """
 
 import tkinter as tk
@@ -11,7 +11,7 @@ import ply.yacc as yacc
 import re
 
 # ============================================================================
-# LEXICAL ANALYZER (LEX)
+# LEXICAL ANALYZER (LEX) 
 # ============================================================================
 
 class Lexer:
@@ -40,7 +40,6 @@ class Lexer:
     t_PLUS = r'\+'
     t_MINUS = r'-'
     t_TIMES = r'\*'
-    t_DIVIDE = r'/'
     t_MODULO = r'%'
     t_ASSIGN = r'='
     t_EQ = r'=='
@@ -59,47 +58,63 @@ class Lexer:
     # Ignored characters (spaces and tabs)
     t_ignore = ' \t'
 
+    # Comment handling - MUST come before DIVIDE
+    def t_COMMENT_SINGLE(self, t):
+        r'//.*'
+        pass  # Ignore single-line comments
+    
+    def t_COMMENT_MULTI(self, t):
+        r'/\*(.|\n)*?\*/'
+        t.lexer.lineno += t.value.count('\n')
+        pass  # Ignore multi-line comments
+
+    # DIVIDE token must come AFTER comment rules
+    def t_DIVIDE(self, t):
+        r'/'
+        return t
+     #decimal(floating point)
     def t_FLOAT_NUM(self, t):
         r'\d+\.\d+'
         t.value = float(t.value)
         return t
-
+     #normal number(10,20)
     def t_NUMBER(self, t):
         r'\d+'
         t.value = int(t.value)
         return t
-
+#recognize names
     def t_ID(self, t):
-        r'[a-zA-Z_][a-zA-Z_0-9]*'
+        r'[a-zA-Z_][a-zA-Z_0-9]*'#Must start with a letter or underscore (_)x, name1, _temp, Count
         t.type = self.reserved.get(t.value, 'ID')
         return t
 
-    def t_newline(self, t):
+    def t_newline(self, t):#counts how many new lines
         r'\n+'
         t.lexer.lineno += len(t.value)
 
-    def t_error(self, t):
+    def t_error(self, t):#handles mistakes in the code.
         self.errors.append(f"Illegal character '{t.value[0]}' at line {t.lineno}")
         t.lexer.skip(1)
+#Saves an error message (like “Illegal character ‘$’)Skips that wrong character and keeps going
 
-    def __init__(self):
-        self.lexer = None
-        self.tokens_list = []
-        self.errors = []
+    def __init__(self):#constructor
+        self.lexer = None #we don’t have any lexer yet.
+        self.tokens_list = [] #makes an empty list to store all the tokens
+        self.errors = []#makes another empty list to store all the errors
 
     def build(self):
-        self.lexer = lex.lex(module=self)
+        self.lexer = lex.lex(module=self)#builds the lexer using lex.lex(module=self) Python to create the lexer from the rule
 
-    def tokenize(self, data):
+    def tokenize(self, data): #Clears any old tokens or errors before starting fresh.
         self.tokens_list = []
         self.errors = []
-        self.lexer.input(data)
+        self.lexer.input(data)#Gives the input code (data)
         
-        while True:
+        while True: ## Keep getting tokens until there are no more left
             tok = self.lexer.token()
             if not tok:
                 break
-            self.tokens_list.append({
+            self.tokens_list.append({ ## Save each token's type, value, line, and position in a list
                 'type': tok.type,
                 'value': tok.value,
                 'line': tok.lineno,
@@ -107,36 +122,72 @@ class Lexer:
             })
         
         return self.tokens_list, self.errors
+
 # ============================================================================
-# SYMBOL TABLE
+# SYMBOL TABLE 
 # ============================================================================
 
 class SymbolTable:
     def __init__(self):
         self.symbols = {}
         self.scope_stack = ['global']
+        self.scope_counter = 0
+        
+    def enter_scope(self, scope_name=None):
+        """Enter a new scope (e.g., entering an if block or while loop)"""
+        if scope_name is None:
+            self.scope_counter += 1
+            scope_name = f"scope_{self.scope_counter}"
+        self.scope_stack.append(scope_name)
+        return scope_name
+    
+    def exit_scope(self):
+        """Exit the current scope"""
+        if len(self.scope_stack) > 1:
+            return self.scope_stack.pop()
+        return None
+    
+    def current_scope(self):
+        """Get the current scope"""
+        return self.scope_stack[-1]
         
     def insert(self, name, symbol_type, value=None, scope=None):
+        """Insert a symbol into the table"""
         if scope is None:
-            scope = self.scope_stack[-1]
+            scope = self.current_scope()
         
+        # Check if variable already exists in current scope
         key = f"{scope}:{name}"
+        if key in self.symbols:
+            return False  # Already declared in this scope
+        
         self.symbols[key] = {
             'name': name,
             'type': symbol_type,
             'value': value,
             'scope': scope
         }
+        return True
     
     def lookup(self, name):
+        """Lookup a symbol, searching from innermost to outermost scope"""
         for scope in reversed(self.scope_stack):
             key = f"{scope}:{name}"
             if key in self.symbols:
                 return self.symbols[key]
         return None
     
+    def lookup_current_scope(self, name):
+        """Lookup a symbol only in the current scope"""
+        scope = self.current_scope()
+        key = f"{scope}:{name}"
+        return self.symbols.get(key)
+    
     def get_all(self):
+        """Get all symbols"""
         return list(self.symbols.values())
+
+
         # ============================================================================
 # PARSER AND SEMANTIC ANALYZER
 # ============================================================================
