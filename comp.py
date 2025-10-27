@@ -123,44 +123,48 @@ class Lexer:
         
         return self.tokens_list, self.errors
 
+
 # ============================================================================
 # SYMBOL TABLE 
 # ============================================================================
 
 class SymbolTable:
     def __init__(self):
-        self.symbols = {}
-        self.scope_stack = ['global']
-        self.scope_counter = 0
-        
-    def enter_scope(self, scope_name=None):
+        self.symbols = {}#This is a dictionary that will store all the variables.
+        self.scope_stack = ['global']#A stack to keep track of scopes. It starts with 'global'.
+        self.scope_counter = 0 #A counter to give unique names to new scopes (like scope_1, scope_2, etc.).
+
+     #enter_scope is called when you start a new block like { ... } or a loop.   
+    def enter_scope(self, scope_name=None): 
         """Enter a new scope (e.g., entering an if block or while loop)"""
-        if scope_name is None:
-            self.scope_counter += 1
+        if scope_name is None: #don’t give a name, it creates one automatically like scope_1.
+            self.scope_counter += 1  #adds the new scope to the stack (scope_stack) so the compiler knows we’re now inside this scope.
             scope_name = f"scope_{self.scope_counter}"
         self.scope_stack.append(scope_name)
         return scope_name
     
     def exit_scope(self):
-        """Exit the current scope"""
-        if len(self.scope_stack) > 1:
+        """Exit the current scope"""#It removes the current scope from the stack.
+        if len(self.scope_stack) > 1: #>1 check makes sure we never remove the global scope.
             return self.scope_stack.pop()
         return None
     
     def current_scope(self):
         """Get the current scope"""
+         # Last item in stack is the current scope
         return self.scope_stack[-1]
         
     def insert(self, name, symbol_type, value=None, scope=None):
         """Insert a symbol into the table"""
-        if scope is None:
+        if scope is None:  # If no scope is given, use the current scope
             scope = self.current_scope()
         
         # Check if variable already exists in current scope
-        key = f"{scope}:{name}"
-        if key in self.symbols:
+        key = f"{scope}:{name}"# Create a unique key for variable in this scope
+        if key in self.symbols:# Check if variable already exists in this scope
             return False  # Already declared in this scope
         
+            # Store the variable information
         self.symbols[key] = {
             'name': name,
             'type': symbol_type,
@@ -171,10 +175,10 @@ class SymbolTable:
     
     def lookup(self, name):
         """Lookup a symbol, searching from innermost to outermost scope"""
-        for scope in reversed(self.scope_stack):
+        for scope in reversed(self.scope_stack): # Check each scope from innermost to outermost
             key = f"{scope}:{name}"
             if key in self.symbols:
-                return self.symbols[key]
+                return self.symbols[key]# Found the variable
         return None
     
     def lookup_current_scope(self, name):
@@ -187,30 +191,35 @@ class SymbolTable:
         """Get all symbols"""
         return list(self.symbols.values())
 
+
 # ============================================================================
 # PARSER AND SEMANTIC ANALYZER 
 # ============================================================================
 
-class Parser:
+class Parser:  # Tokens come from the Lexer class
     tokens = Lexer.tokens
     
-    def __init__(self):
+    def __init__(self):  # Symbol table to store variables and their scopes
         self.symbol_table = SymbolTable()
-        self.intermediate_code = []
+        self.intermediate_code = []# List to store intermediate code (3-address code)
+        # Counters to generate unique temp variables and labels
         self.temp_count = 0
         self.label_count = 0
+         # List to store errors found during parsing
         self.errors = []
-        self.parse_tree = []
+        self.parse_tree = [] # Parse tree for syntactic structure
         
     def new_temp(self):
+        # Generate a new temporary variable like t1, t2, ...
         self.temp_count += 1
         return f"t{self.temp_count}"
     
     def new_label(self):
-        self.label_count += 1
+        self.label_count += 1# Generate a new label like L1, L2, ...
         return f"L{self.label_count}"
     
     def emit(self, op, arg1=None, arg2=None, result=None):
+        # Add a line of intermediate code
         code = {'op': op, 'arg1': arg1, 'arg2': arg2, 'result': result}
         self.intermediate_code.append(code)
         return result
@@ -224,13 +233,13 @@ class Parser:
     # Grammar rules
     def p_program(self, p):
         '''program : statement_list'''
-        p[0] = ('program', p[1])
+        p[0] = ('program', p[1])  # Root of parse tree
         self.parse_tree.append(p[0])
     
     def p_statement_list(self, p):
         '''statement_list : statement_list statement
                          | statement'''
-        if len(p) == 3:
+        if len(p) == 3:        # Combine multiple statements into a list
             p[0] = p[1] + [p[2]]
         else:
             p[0] = [p[1]]
@@ -242,7 +251,7 @@ class Parser:
                     | if_statement
                     | while_statement
                     | block'''
-        p[0] = p[1]
+        p[0] = p[1]      # A statement can be any of these
     
     def p_declaration(self, p):
         '''declaration : type ID SEMICOLON
@@ -258,9 +267,10 @@ class Parser:
                 self.symbol_table.insert(var_name, var_type)
                 p[0] = ('declaration', var_type, var_name)
             else:
+                     # Declaration with initialization
                 value = p[4]
                 self.symbol_table.insert(var_name, var_type, value)
-                self.emit('=', value, None, var_name)
+                self.emit('=', value, None, var_name)# Emit intermediate code: var_name = value
                 p[0] = ('declaration_init', var_type, var_name, value)
     
     def p_type(self, p):
@@ -539,6 +549,7 @@ class CodeGenerator:
         self.assembly_code.append("    INT 0x80")
         
         return self.assembly_code
+
 
 # ============================================================================
 # SIMPLE GUI APPLICATION
